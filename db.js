@@ -3,14 +3,30 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-let dbConfig = process.env.DATABASE_URL;
-if (!dbConfig) {
+let dbConfig = null;
+if (process.env.DATABASE_URL) {
+    try {
+        const url = require('url');
+        const parsed = new url.URL(process.env.DATABASE_URL);
+        dbConfig = {
+            host: parsed.hostname,
+            port: parsed.port ? parseInt(parsed.port) : 3306,
+            user: parsed.username,
+            password: decodeURIComponent(parsed.password),
+            database: parsed.pathname ? parsed.pathname.replace('/', '') : 'test',
+            ssl: { rejectUnauthorized: true } // Force SSL for TiDB
+        };
+    } catch(e) {
+        dbConfig = process.env.DATABASE_URL;
+    }
+} else {
     dbConfig = {
         host: process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.DB_PORT || '3306'),
         user: process.env.DB_USER || 'root',
         password: process.env.DB_PASSWORD || '',
-        database: process.env.DB_DATABASE || 'flowreach'
+        database: process.env.DB_DATABASE || 'flowreach',
+        ssl: { rejectUnauthorized: true }
     };
 }
 
@@ -54,8 +70,9 @@ async function connectDatabase() {
             return;
         } catch (poolErr) {
             // Fallback: try creating the database (local XAMPP setup)
-            // Skip this if dbConfig is a URL string
-            if (typeof dbConfig === 'string') {
+            // Skip this if we are connecting to a remote TiDB/AWS host to avoid root privileges errors
+            if (dbConfig.host && dbConfig.host !== 'localhost' && dbConfig.host !== '127.0.0.1') {
+                console.error("Remote DB connection error details:", poolErr.message);
                 throw poolErr;
             }
             const tempConn = await mysql.createConnection({
