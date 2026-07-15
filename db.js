@@ -99,6 +99,15 @@ async function connectDatabase() {
 // Auto-migrations runner (MySQL Dialect syntax)
 async function runAutoMigrations() {
     try {
+        // Attempt to create and use our own database to avoid permissions errors on default databases
+        try {
+            await pool.query('CREATE DATABASE IF NOT EXISTS flowreach');
+            await pool.query('USE flowreach');
+            console.log("🐬  [DATABASE] Switched to 'flowreach' database context.");
+        } catch (dbErr) {
+            console.log("⚠️  Could not create 'flowreach' database, continuing with default:", dbErr.message);
+        }
+
         // 1. Create businesses table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS businesses (
