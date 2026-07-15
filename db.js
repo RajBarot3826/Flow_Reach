@@ -3,13 +3,16 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-const dbConfig = {
-    host: process.env.DB_HOST || '127.0.0.1',
-    port: parseInt(process.env.DB_PORT || '3306'),
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_DATABASE || 'flowreach'
-};
+let dbConfig = process.env.DATABASE_URL;
+if (!dbConfig) {
+    dbConfig = {
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.DB_PORT || '3306'),
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASSWORD || '',
+        database: process.env.DB_DATABASE || 'flowreach'
+    };
+}
 
 let pool = null;
 global.useMemoryDb = false;
@@ -46,11 +49,15 @@ async function connectDatabase() {
         try {
             pool = mysql.createPool(dbConfig);
             const [rows] = await pool.query('SELECT 1');
-            console.log(`\n🐬  [DATABASE SUCCESS] Connected to MySQL on ${dbConfig.host}:${dbConfig.port}`);
+            console.log(`\n🐬  [DATABASE SUCCESS] Connected to MySQL successfully!`);
             await runAutoMigrations();
             return;
         } catch (poolErr) {
             // Fallback: try creating the database (local XAMPP setup)
+            // Skip this if dbConfig is a URL string
+            if (typeof dbConfig === 'string') {
+                throw poolErr;
+            }
             const tempConn = await mysql.createConnection({
                 host: dbConfig.host,
                 port: dbConfig.port,
