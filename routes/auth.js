@@ -265,4 +265,17 @@ router.get('/api-configs', async (req, res) => {
     }
 });
 
+// GET /api/auth/meta-status → Check if server-side Meta credentials are configured
+router.get('/meta-status', (req, res) => {
+    const phoneId = process.env.META_PHONE_NUMBER_ID;
+    const token = process.env.META_ACCESS_TOKEN;
+    const connected = !!(phoneId && token && token !== 'your_system_user_token_here');
+    res.json({
+        connected,
+        phone_number_id: connected ? phoneId.substring(0, 4) + '****' : null,
+        platform: 'WhatsApp Business Cloud API',
+        message: connected ? 'Server-side Meta credentials are active.' : 'No Meta credentials configured on server.'
+    });
+});
+
 module.exports = router;

@@ -21,12 +21,12 @@ const worker = new Worker('campaign-dispatch', async job => {
     
     console.log(`[Worker] Processing message for ${contact.phone} (Campaign ${campaignId})`);
 
-    // 1. Fetch the master device credentials for sending (assuming single-tenant for now, or fetch by user_id)
-    const bizRes = await db.query("SELECT * FROM businesses LIMIT 1");
-    if (bizRes.rows.length === 0) {
-        throw new Error("No connected Meta business account found.");
+    // 1. Use server-side Meta credentials from environment variables
+    const phoneId = process.env.META_PHONE_NUMBER_ID;
+    const accessToken = process.env.META_ACCESS_TOKEN;
+    if (!phoneId || !accessToken) {
+        throw new Error("META_PHONE_NUMBER_ID and META_ACCESS_TOKEN must be set in environment variables.");
     }
-    const biz = bizRes.rows[0];
 
     // 2. Prepare the payload exactly as the Meta API expects it
     let payload = {
@@ -66,11 +66,11 @@ const worker = new Worker('campaign-dispatch', async job => {
     try {
         // 3. Fire the request to Meta
         const response = await axios.post(
-            `https://graph.facebook.com/v19.0/${biz.phone_id}/messages`,
+            `https://graph.facebook.com/v19.0/${phoneId}/messages`,
             payload,
             {
                 headers: {
-                    'Authorization': `Bearer ${biz.access_token}`,
+                    'Authorization': `Bearer ${accessToken}`,
                     'Content-Type': 'application/json'
                 }
             }
