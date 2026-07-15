@@ -7,17 +7,22 @@ const db = require('../db');
 // GET Connection Status
 router.get('/status', async (req, res) => {
     try {
-        const result = await db.query("SELECT * FROM businesses ORDER BY id ASC");
-        if (result.rows.length > 0) {
-            const devices = result.rows.map(biz => ({
-                id: biz.id,
-                name: biz.name,
-                phone: biz.connected_phone,
-                whatsapp_phone_number_id: biz.whatsapp_phone_number_id,
-                whatsapp_business_account_id: biz.whatsapp_business_account_id,
-                meta_access_token: biz.meta_access_token,
-                plan: biz.plan || 'Professional'
-            }));
+        const phoneId = process.env.META_PHONE_NUMBER_ID;
+        const token = process.env.META_ACCESS_TOKEN;
+        const wabaId = process.env.META_BUSINESS_ACCOUNT_ID || process.env.META_WABA_ID || '';
+        
+        const connected = !!(phoneId && token && token !== 'your_system_user_token_here');
+        
+        if (connected) {
+            const devices = [{
+                id: 1,
+                name: "Company WhatsApp Business",
+                phone: process.env.CONNECTED_PHONE || "Meta Verified API",
+                whatsapp_phone_number_id: phoneId,
+                whatsapp_business_account_id: wabaId,
+                meta_access_token: token,
+                plan: 'Enterprise'
+            }];
             
             return res.json({
                 connected: true,
@@ -29,6 +34,7 @@ router.get('/status', async (req, res) => {
                 devices: devices
             });
         }
+        
         return res.json({ connected: false, devices: [] });
     } catch (e) {
         console.error(e);
