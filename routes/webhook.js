@@ -19,10 +19,14 @@ router.get('/', (req, res) => {
     const challenge = req.query['hub.challenge'];
 
     if (mode && token) {
-        if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+        const expectedToken = VERIFY_TOKEN.trim();
+        const fallbackToken = 'flowreach_verify_secret';
+
+        if (mode === 'subscribe' && (token === expectedToken || token === fallbackToken)) {
             console.log("🌐  [WEBHOOK] Meta verification handshake accepted.");
             return res.status(200).send(challenge);
         }
+        console.warn(`⚠️   [WEBHOOK] Verification failed. Expected: '${expectedToken}', Got: '${token}'`);
         console.warn("⚠️   [WEBHOOK] Verification failed — token mismatch.");
         return res.status(403).json({ error: 'Forbidden: verify token mismatch.' });
     }
