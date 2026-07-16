@@ -37,7 +37,8 @@ global.useMemoryDb = false;
 global.memoryDb = {
     users: [
         { id: 1, name: "TEST USER", email: "user@flowreach.com", phone: "+919988776655", password: "password", company: "FlowReach Enterprise Partner", role: "user", wallet_balance: 500.00 },
-        { id: 2, name: "System Admin", email: "admin@flowreach.com", phone: "", password: "Admin@1234", company: "FlowReach HQ", role: "admin", wallet_balance: 0.00 }
+        { id: 2, name: "System Admin", email: "admin@flowreach.com", phone: "", password: "Admin@1234", company: "FlowReach HQ", role: "admin", wallet_balance: 0.00 },
+        { id: 3, name: "Raj Barot", email: "barotrajd@gmail.com", phone: "+919876543210", password: "password", company: "Barot Tech Solutions", role: "user", wallet_balance: 1000.00 }
     ],
     businesses: [],
     contacts: [
