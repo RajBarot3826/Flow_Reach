@@ -58,7 +58,7 @@ global.memoryDb = {
 };
 
 // Auto-increment IDs counter for Memory DB
-let idCounters = { users: 3, businesses: 1, contacts: 4, templates: 2, campaigns: 1, chat_messages: 1, wallet_recharges: 1, api_configs: 1 };
+let idCounters = { users: 4, businesses: 1, contacts: 4, templates: 2, campaigns: 1, chat_messages: 1, wallet_recharges: 1, api_configs: 1 };
 
 async function connectDatabase() {
     try {

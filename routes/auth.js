@@ -164,14 +164,13 @@ router.post('/register', async (req, res) => {
         ]);
         
         const insertId = result.rows[0] ? result.rows[0].insertId : null;
-        let newUser;
-        if (insertId) {
-            const selectResult = await db.query("SELECT id, name, email, company, role FROM users WHERE id = ?", [insertId]);
-            newUser = selectResult.rows[0];
-        } else {
-            const selectResult = await db.query("SELECT id, name, email, company, role FROM users WHERE email = ?", [email]);
-            newUser = selectResult.rows[0];
-        }
+        const newUser = {
+            id: insertId || Date.now(),
+            name: name,
+            email: email,
+            company: company || "",
+            role: role
+        };
         
         res.status(201).json({
             success: true,
