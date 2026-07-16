@@ -260,6 +260,18 @@ async function runAutoMigrations() {
             );
         `);
 
+        // 9. Create pending_registrations table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS pending_registrations (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                phone_number_id VARCHAR(100) NOT NULL,
+                phone_number VARCHAR(50) NOT NULL,
+                cc VARCHAR(10) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
         console.log("🛠️  [DATABASE MIGRATIONS] Check finished. Tables verified successfully.\n");
         
         // Seed default templates if empty

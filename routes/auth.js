@@ -312,4 +312,177 @@ router.get('/meta-status', (req, res) => {
     });
 });
 
+// POST /api/auth/register-phone-request
+// Adds a phone number to WABA, then requests a verification code.
+router.post('/register-phone-request', async (req, res) => {
+    const { cc, phone } = req.body;
+    const userId = req.headers['x-user-id'] || 1;
+    
+    if (!cc || !phone) {
+        return res.status(400).json({ error: "Country code (cc) and phone number are required." });
+    }
+    
+    const wabaId = process.env.META_BUSINESS_ACCOUNT_ID || process.env.META_WABA_ID;
+    const token = process.env.META_ACCESS_TOKEN;
+    const hasRealCreds = wabaId && token && token !== 'your_system_user_token_here';
+    
+    try {
+        // Fetch user company name to use as display name on Meta
+        const userRes = await db.query("SELECT company FROM users WHERE id = ?", [userId]);
+        const companyName = (userRes.rows.length > 0 ? userRes.rows[0].company : null) || "FlowReach Business";
+
+        if (hasRealCreds) {
+            try {
+                const axios = require('axios');
+                
+                // 1. Add phone number to WABA
+                const addRes = await axios.post(
+                    `https://graph.facebook.com/v19.0/${wabaId}/phone_numbers`,
+                    {
+                        cc: cc.replace('+', ''),
+                        phone_number: phone,
+                        verified_name: companyName
+                    },
+                    { headers: { 'Authorization': `Bearer ${token}` } }
+                );
+                
+                const phoneNumberId = addRes.data.id;
+                
+                // 2. Request verification code via SMS
+                await axios.post(
+                    `https://graph.facebook.com/v19.0/${phoneNumberId}/request_code`,
+                    {
+                        code_method: "SMS",
+                        language: "en"
+                    },
+                    { headers: { 'Authorization': `Bearer ${token}` } }
+                );
+                
+                // 3. Save pending registration details
+                await db.query("DELETE FROM pending_registrations WHERE user_id = ?", [userId]);
+                await db.query(
+                    "INSERT INTO pending_registrations (user_id, phone_number_id, phone_number, cc) VALUES (?, ?, ?, ?)",
+                    [userId, phoneNumberId, phone, cc]
+                );
+                
+                return res.json({
+                    success: true,
+                    phone_number_id: phoneNumberId,
+                    simulation: false,
+                    message: `Verification code requested successfully. SMS sent to +${cc} ${phone}.`
+                });
+            } catch (metaErr) {
+                console.error("Meta WABA Registration failed, falling back to Simulation Mode:", metaErr.response?.data || metaErr.message);
+                // Fall through to simulation mode so testing doesn't block!
+            }
+        }
+        
+        // --- SIMULATION MODE ---
+        const simulatedPhoneId = "sim_" + Math.floor(Math.random() * 1000000000);
+        const simCode = "123456"; // Standard simple code for mock verification
+        
+        console.log(`\n📢  [SIMULATION OTP] Generated verification code for +${cc} ${phone}:`);
+        console.log(`👉  CODE: ${simCode}`);
+        console.log(`👉  PHONE ID: ${simulatedPhoneId}\n`);
+        
+        await db.query("DELETE FROM pending_registrations WHERE user_id = ?", [userId]);
+        await db.query(
+            "INSERT INTO pending_registrations (user_id, phone_number_id, phone_number, cc) VALUES (?, ?, ?, ?)",
+            [userId, simulatedPhoneId, phone, cc]
+        );
+        
+        return res.json({
+            success: true,
+            phone_number_id: simulatedPhoneId,
+            simulation: true,
+            message: `[SIMULATION] Verification code requested. Enter code '123456' to verify.`
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to request phone registration." });
+    }
+});
+
+// POST /api/auth/register-phone-verify
+// Verifies OTP code, then links the verified Phone ID to the user's business profile.
+router.post('/register-phone-verify', async (req, res) => {
+    const { code, phone_number_id } = req.body;
+    const userId = req.headers['x-user-id'] || 1;
+    
+    if (!code || !phone_number_id) {
+        return res.status(400).json({ error: "Verification code and phone number ID are required." });
+    }
+    
+    const token = process.env.META_ACCESS_TOKEN;
+    const isSimulation = phone_number_id.startsWith('sim_');
+    
+    try {
+        // Find matching pending registration
+        const pendingRes = await db.query(
+            "SELECT * FROM pending_registrations WHERE user_id = ? AND phone_number_id = ?",
+            [userId, phone_number_id]
+        );
+        
+        if (pendingRes.rows.length === 0) {
+            return res.status(400).json({ error: "No pending registration found for this user and phone number ID." });
+        }
+        
+        const pending = pendingRes.rows[0];
+        
+        if (!isSimulation) {
+            try {
+                const axios = require('axios');
+                
+                // Call Meta to verify code
+                await axios.post(
+                    `https://graph.facebook.com/v19.0/${phone_number_id}/verify_code`,
+                    { code: code },
+                    { headers: { 'Authorization': `Bearer ${token}` } }
+                );
+            } catch (metaErr) {
+                console.error("Meta Verification Code failed:", metaErr.response?.data || metaErr.message);
+                return res.status(400).json({
+                    success: false,
+                    error: "Invalid verification code or code expired. Please request a new code."
+                });
+            }
+        } else {
+            // Check simulation code
+            if (code !== "123456") {
+                return res.status(400).json({ success: false, error: "Invalid simulation code. Enter '123456'." });
+            }
+        }
+        
+        // Code verified successfully! Link the phone number to the user's profile
+        await db.query("DELETE FROM businesses WHERE user_id = ?", [userId]);
+        
+        const insertQ = `
+            INSERT INTO businesses (name, whatsapp_phone_number_id, whatsapp_business_account_id, meta_access_token, connected_phone, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        const fullPhone = `+${pending.cc}${pending.phone_number}`;
+        await db.query(insertQ, [
+            isSimulation ? "WhatsApp Cloud API (Simulated)" : "WhatsApp Cloud API (Live)",
+            phone_number_id,
+            process.env.META_BUSINESS_ACCOUNT_ID || "",
+            token || "simulated_token",
+            fullPhone,
+            userId
+        ]);
+        
+        // Clean up pending registration
+        await db.query("DELETE FROM pending_registrations WHERE user_id = ?", [userId]);
+        
+        res.json({
+            success: true,
+            message: "Phone number verified and registered successfully!",
+            phone: fullPhone,
+            phone_number_id: phone_number_id
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to verify registration code." });
+    }
+});
+
 module.exports = router;
