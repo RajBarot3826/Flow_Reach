@@ -97,9 +97,11 @@ const worker = new Worker('campaign-dispatch', async job => {
             VALUES (?, ?, ?, ?)
         `, [campaignId, contact.phone, 'Sent', msgId]);
 
-        // 5. Deduct wallet balance (Rs. 0.30 per message)
+        // 5. Deduct wallet balance (base rate + 30% markup per message)
         if (user_id && !global.useMemoryDb) {
-            await db.query("UPDATE users SET wallet_balance = wallet_balance - 0.30 WHERE id = ?", [user_id]);
+            const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
+            const ratePerMsg = baseRate * 1.30;
+            await db.query("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?", [ratePerMsg, user_id]);
         }
 
         return { success: true, messageId: msgId };

@@ -36,8 +36,9 @@ router.get('/stats', async (req, res) => {
         const totalSent = parseInt(sentCountRes.rows[0]?.total_sent || '0');
         const totalRecharges = parseFloat(rechargesSumRes.rows[0]?.total_recharges || '0');
         
-        const userRate = 0.30;
-        const metaRate = 0.12;
+        const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
+        const userRate = baseRate * 1.30;
+        const metaRate = baseRate;
         const platformRevenue = totalSent * userRate;
         const metaCostBill = totalSent * metaRate;
         const adminNetProfit = totalSent * (userRate - metaRate);

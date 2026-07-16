@@ -45,18 +45,20 @@ router.post('/launch', async (req, res) => {
             return res.status(400).json({ error: "Target segment contains 0 contacts. Populate lists first." });
         }
         
-        // Check user wallet balance (Requires Rs. 0.30 per message)
+        // Check user wallet balance (Requires base rate + 30% markup per message)
         const userId = req.headers['x-user-id'] || req.body.userId;
         let user = null;
         if (userId) {
             const userRes = await db.query("SELECT * FROM users WHERE id = ?", [userId]);
             if (userRes.rows.length > 0) {
                 user = userRes.rows[0];
-                const requiredBal = contacts.length * 0.30;
+                const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
+                const ratePerMsg = baseRate * 1.30;
+                const requiredBal = contacts.length * ratePerMsg;
                 const currentBal = parseFloat(user.wallet_balance || '0.00');
                 if (currentBal < requiredBal) {
                     return res.status(402).json({ 
-                        error: `Insufficient wallet balance. Sending this campaign to ${contacts.length} contacts requires Rs. ${requiredBal.toFixed(2)} (at Rs. 0.30/msg), but your balance is Rs. ${currentBal.toFixed(2)}. Please recharge your wallet.` 
+                        error: `Insufficient wallet balance. Sending this campaign to ${contacts.length} contacts requires Rs. ${requiredBal.toFixed(2)} (at Rs. ${ratePerMsg.toFixed(2)}/msg), but your balance is Rs. ${currentBal.toFixed(2)}. Please recharge your wallet.` 
                     });
                 }
             }
@@ -181,10 +183,12 @@ async function runBackgroundBroadcast(campaignId, contacts, tpl, biz, userId) {
         if (success) {
             delivered++;
             
-            // Deduct Rs. 0.30 per successfully delivered message from user balance on the server!
+            // Deduct base rate + 30% markup per successfully delivered message from user balance on the server!
             if (userId) {
                 try {
-                    await db.query("UPDATE users SET wallet_balance = wallet_balance - 0.30 WHERE id = ?", [userId]);
+                    const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
+                    const ratePerMsg = baseRate * 1.30;
+                    await db.query("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?", [ratePerMsg, userId]);
                 } catch (walletErr) {
                     console.error("⚠️ [WALLET DEDUCTION ERROR] Failed to deduct balance:", walletErr.message);
                 }
@@ -403,7 +407,7 @@ function sendWsUpdate(payload) {
     }
 }
 
-// POST /api/campaigns/deduct-message - Deduct Rs. 0.30 for a single sent message
+// POST /api/campaigns/deduct-message - Deduct base rate + 30% markup for a single sent message
 router.post('/deduct-message', async (req, res) => {
     const userId = req.headers['x-user-id'];
     if (!userId) {
@@ -411,8 +415,9 @@ router.post('/deduct-message', async (req, res) => {
     }
     
     try {
-        const rate = 0.30;
-        // Subtract Rs. 0.30 from user's wallet
+        const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
+        const rate = baseRate * 1.30;
+        // Subtract base rate + 30% markup from user's wallet
         await db.query("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?", [rate, userId]);
         
         // Return latest balance details
