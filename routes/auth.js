@@ -69,7 +69,7 @@ router.get('/status', async (req, res) => {
         return res.json({ connected: false, devices: [] });
     } catch (e) {
         console.error(e);
-        res.status(500).json({ error: "Failed to read device pairing status." });
+        res.status(500).json({ error: "Failed to read device pairing status.", details: e.message, stack: e.stack });
     }
 });
 
