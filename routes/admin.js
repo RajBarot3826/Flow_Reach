@@ -67,7 +67,14 @@ router.get('/stats', async (req, res) => {
 // GET /api/admin/users - Retrieve all registered users
 router.get('/users', async (req, res) => {
     try {
-        const result = await db.query("SELECT id, name, email, phone, company, role, wallet_balance, created_at FROM users ORDER BY id DESC");
+        const queryStr = `
+            SELECT u.id, u.name, u.email, u.phone, u.company, u.role, u.wallet_balance, u.created_at,
+                   b.connected_phone, b.whatsapp_phone_number_id, b.whatsapp_business_account_id
+            FROM users u
+            LEFT JOIN businesses b ON u.id = b.user_id
+            ORDER BY u.id DESC
+        `;
+        const result = await db.query(queryStr);
         res.json({ success: true, users: result.rows });
     } catch (e) {
         console.error("Admin users list fetch error:", e);

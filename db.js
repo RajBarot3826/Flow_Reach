@@ -409,7 +409,15 @@ async function query(text, params = []) {
             }
         }
         else if (sqlLower.includes('from users')) {
-            rows = [...global.memoryDb.users];
+            rows = global.memoryDb.users.map(u => {
+                const biz = global.memoryDb.businesses.find(b => b.user_id === u.id) || {};
+                return {
+                    ...u,
+                    connected_phone: biz.connected_phone || null,
+                    whatsapp_phone_number_id: biz.whatsapp_phone_number_id || null,
+                    whatsapp_business_account_id: biz.whatsapp_business_account_id || null
+                };
+            });
             if (sqlLower.includes('email = ? and password = ?') && params.length >= 2) {
                 const uEmail = params[0];
                 const uPass = params[1];
