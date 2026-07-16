@@ -145,9 +145,26 @@ async function runBackgroundBroadcast(campaignId, contacts, tpl, biz, userId) {
         
         let success = false;
         
-        // Option 2: Use Centralized Platform Credentials from .env
-        const masterToken = process.env.META_ACCESS_TOKEN;
-        const masterPhoneId = process.env.META_PHONE_NUMBER_ID;
+        // Query user-specific credentials if they exist
+        let masterPhoneId = null;
+        let masterToken = null;
+        
+        if (userId) {
+            try {
+                const bizRes = await db.query("SELECT * FROM businesses WHERE user_id = ?", [userId]);
+                if (bizRes.rows.length > 0) {
+                    masterPhoneId = bizRes.rows[0].whatsapp_phone_number_id;
+                    masterToken = bizRes.rows[0].meta_access_token;
+                }
+            } catch (dbErr) {
+                console.error("DB error fetching credentials:", dbErr.message);
+            }
+        }
+        
+        if (!masterPhoneId || !masterToken) {
+            masterToken = process.env.META_ACCESS_TOKEN;
+            masterPhoneId = process.env.META_PHONE_NUMBER_ID;
+        }
         
         if (masterToken && masterPhoneId && masterToken !== 'your_system_user_token_here') {
             success = await callMetaCloudAPI(contact, tpl, masterToken, masterPhoneId);

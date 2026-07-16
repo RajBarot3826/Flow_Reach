@@ -112,6 +112,7 @@ async function runAutoMigrations() {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS businesses (
                 id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
                 name VARCHAR(255) NOT NULL,
                 whatsapp_phone_number_id VARCHAR(100),
                 whatsapp_business_account_id VARCHAR(100),
@@ -121,6 +122,14 @@ async function runAutoMigrations() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+
+        try {
+            await pool.query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS user_id INT");
+        } catch (err) {
+            try {
+                await pool.query("ALTER TABLE businesses ADD COLUMN user_id INT");
+            } catch (err2) {}
+        }
 
         // 2. Create contacts table
         await pool.query(`

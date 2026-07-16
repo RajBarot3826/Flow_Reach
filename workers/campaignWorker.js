@@ -21,11 +21,25 @@ const worker = new Worker('campaign-dispatch', async job => {
     
     console.log(`[Worker] Processing message for ${contact.phone} (Campaign ${campaignId})`);
 
-    // 1. Use server-side Meta credentials from environment variables
-    const phoneId = process.env.META_PHONE_NUMBER_ID;
-    const accessToken = process.env.META_ACCESS_TOKEN;
+    // 1. Fetch user-specific credentials if they exist in the DB, otherwise fall back to environment variables
+    let phoneId = null;
+    let accessToken = null;
+    
+    if (user_id) {
+        const bizRes = await db.query("SELECT * FROM businesses WHERE user_id = ?", [user_id]);
+        if (bizRes.rows.length > 0) {
+            phoneId = bizRes.rows[0].whatsapp_phone_number_id;
+            accessToken = bizRes.rows[0].meta_access_token;
+        }
+    }
+    
     if (!phoneId || !accessToken) {
-        throw new Error("META_PHONE_NUMBER_ID and META_ACCESS_TOKEN must be set in environment variables.");
+        phoneId = process.env.META_PHONE_NUMBER_ID;
+        accessToken = process.env.META_ACCESS_TOKEN;
+    }
+
+    if (!phoneId || !accessToken) {
+        throw new Error("Meta API credentials (Access Token or Phone ID) are not configured for this user or server.");
     }
 
     // 2. Prepare the payload exactly as the Meta API expects it

@@ -7,6 +7,35 @@ const db = require('../db');
 // GET Connection Status
 router.get('/status', async (req, res) => {
     try {
+        const userId = req.headers['x-user-id'] || req.query.userId || 1;
+        
+        // 1. Check if user has custom credentials in DB
+        const result = await db.query("SELECT * FROM businesses WHERE user_id = ? ORDER BY id ASC", [userId]);
+        if (result.rows.length > 0) {
+            const devices = result.rows.map(biz => ({
+                id: biz.id,
+                name: biz.name || "Private WhatsApp Cloud API",
+                phone: biz.connected_phone,
+                whatsapp_phone_number_id: biz.whatsapp_phone_number_id,
+                whatsapp_business_account_id: biz.whatsapp_business_account_id,
+                meta_access_token: biz.meta_access_token,
+                plan: biz.plan || 'Professional',
+                is_private: true
+            }));
+            
+            return res.json({
+                connected: true,
+                phone: devices[0].phone,
+                whatsapp_phone_number_id: devices[0].whatsapp_phone_number_id,
+                whatsapp_business_account_id: devices[0].whatsapp_business_account_id,
+                meta_access_token: devices[0].meta_access_token,
+                plan: devices[0].plan,
+                is_private: true,
+                devices: devices
+            });
+        }
+
+        // 2. Fallback to server-side system-wide environment credentials
         const phoneId = process.env.META_PHONE_NUMBER_ID;
         const token = process.env.META_ACCESS_TOKEN;
         const wabaId = process.env.META_BUSINESS_ACCOUNT_ID || process.env.META_WABA_ID || '';
@@ -21,7 +50,8 @@ router.get('/status', async (req, res) => {
                 whatsapp_phone_number_id: phoneId,
                 whatsapp_business_account_id: wabaId,
                 meta_access_token: token,
-                plan: 'Enterprise'
+                plan: 'Enterprise',
+                is_private: false
             }];
             
             return res.json({
@@ -31,6 +61,7 @@ router.get('/status', async (req, res) => {
                 whatsapp_business_account_id: devices[0].whatsapp_business_account_id,
                 meta_access_token: devices[0].meta_access_token,
                 plan: devices[0].plan,
+                is_private: false,
                 devices: devices
             });
         }
@@ -45,29 +76,31 @@ router.get('/status', async (req, res) => {
 // POST Link Credentials
 router.post('/connect', async (req, res) => {
     const { name, whatsapp_phone_number_id, whatsapp_business_account_id, meta_access_token, connected_phone } = req.body;
+    const userId = req.headers['x-user-id'] || 1;
     
     if (!whatsapp_phone_number_id || !meta_access_token || !connected_phone) {
         return res.status(400).json({ error: "Missing required fields (Phone ID, Token, Phone)." });
     }
     
     try {
-        // Clear any duplicate credentials for the same phone ID
-        await db.query("DELETE FROM businesses WHERE whatsapp_phone_number_id = ?", [whatsapp_phone_number_id]);
+        // Clear any duplicate credentials for the same user ID to update it
+        await db.query("DELETE FROM businesses WHERE user_id = ?", [userId]);
         
         const q = `
-            INSERT INTO businesses (name, whatsapp_phone_number_id, whatsapp_business_account_id, meta_access_token, connected_phone)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO businesses (name, whatsapp_phone_number_id, whatsapp_business_account_id, meta_access_token, connected_phone, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         `;
         await db.query(q, [
-            name || "My Business",
+            name || "Private WhatsApp Cloud API",
             whatsapp_phone_number_id,
             whatsapp_business_account_id || "",
             meta_access_token,
-            connected_phone
+            connected_phone,
+            userId
         ]);
         
-        // Fetch devices list
-        const selectResult = await db.query("SELECT * FROM businesses WHERE whatsapp_phone_number_id = ?", [whatsapp_phone_number_id]);
+        // Fetch devices list for verification
+        const selectResult = await db.query("SELECT * FROM businesses WHERE user_id = ?", [userId]);
         const biz = selectResult.rows[0];
         
         res.status(201).json({
@@ -87,15 +120,10 @@ router.post('/connect', async (req, res) => {
 
 // POST Disconnect Phone
 router.post('/disconnect', async (req, res) => {
-    const { whatsapp_phone_number_id } = req.body;
+    const userId = req.headers['x-user-id'] || 1;
     try {
-        if (whatsapp_phone_number_id) {
-            await db.query("DELETE FROM businesses WHERE whatsapp_phone_number_id = ?", [whatsapp_phone_number_id]);
-            res.json({ success: true, message: `WhatsApp device ${whatsapp_phone_number_id} disconnected.` });
-        } else {
-            await db.query("DELETE FROM businesses");
-            res.json({ success: true, message: "All WhatsApp devices disconnected." });
-        }
+        await db.query("DELETE FROM businesses WHERE user_id = ?", [userId]);
+        res.json({ success: true, message: "WhatsApp device disconnected." });
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: "Failed to disconnect device." });

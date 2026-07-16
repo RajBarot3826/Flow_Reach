@@ -83,9 +83,12 @@ router.post('/', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/sync', async (req, res) => {
     try {
-        // Use server-side credentials from environment variables (set in Render dashboard)
-        const wabaId     = process.env.META_WABA_ID || process.env.META_BUSINESS_ACCOUNT_ID;
-        const token      = process.env.META_ACCESS_TOKEN;
+        const userId = req.headers['x-user-id'] || 1;
+        const bizResult = await db.query("SELECT * FROM businesses WHERE user_id = ?", [userId]);
+        const biz = bizResult.rows.length > 0 ? bizResult.rows[0] : null;
+
+        const wabaId     = biz?.whatsapp_business_account_id || process.env.META_BUSINESS_ACCOUNT_ID || process.env.META_WABA_ID;
+        const token      = biz?.meta_access_token             || process.env.META_ACCESS_TOKEN;
         const apiVersion = META_API_VERSION;
 
         let syncedFromMeta = false;
