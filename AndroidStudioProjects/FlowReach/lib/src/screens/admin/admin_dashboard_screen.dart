@@ -682,10 +682,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
             children: [
-              _buildTelemetryItem(Icons.dns_rounded, 'API Server', 'Online (36ms)', Colors.emerald),
-              _buildTelemetryItem(Icons.webhook_rounded, 'WebSocket', 'Connected', Colors.emerald),
-              _buildTelemetryItem(Icons.storage_rounded, 'Database', 'Healthy', Colors.emerald),
-              _buildTelemetryItem(Icons.chat_bubble_outline_rounded, 'Meta API', 'Active (100%)', Colors.emerald),
+              _buildTelemetryItem(Icons.dns_rounded, 'API Server', 'Online (36ms)', const Color(0xFF10B981)),
+              _buildTelemetryItem(Icons.webhook_rounded, 'WebSocket', 'Connected', const Color(0xFF10B981)),
+              _buildTelemetryItem(Icons.storage_rounded, 'Database', 'Healthy', const Color(0xFF10B981)),
+              _buildTelemetryItem(Icons.chat_bubble_outline_rounded, 'Meta API', 'Active (100%)', const Color(0xFF10B981)),
             ],
           ),
 
