@@ -311,6 +311,7 @@ async function runAutoMigrations() {
 
     } catch (e) {
         console.error("❌  [DATABASE MIGRATION ERROR] Auto schema setup failed:", e);
+        throw e;
     }
 }
 
