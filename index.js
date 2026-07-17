@@ -35,7 +35,7 @@ app.get('/', (req, res) => {
     res.json({
         service:       "FlowReach WhatsApp Broadcast Engine",
         status:        "Active",
-        version:       "2.0.0",
+        version:       "2.0.1-fallback-fixed",
         database_mode: global.useMemoryDb ? "Memory DB (local)" : "MySQL",
         endpoints: {
             auth:      "/api/auth",
