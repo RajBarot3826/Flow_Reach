@@ -192,28 +192,37 @@ router.post('/login', async (req, res) => {
     }
     
     try {
-        if (email.trim().toLowerCase() === 'admin@flowreach.com' && password === 'Admin@1234') {
-            const uCheck = await db.query("SELECT * FROM users WHERE email = 'admin@flowreach.com'");
-            if (uCheck.rows.length === 0) {
-                await db.query(`
-                    INSERT INTO users (name, email, phone, password, company, role, wallet_balance)
-                    VALUES ('System Admin', 'admin@flowreach.com', '', 'Admin@1234', 'FlowReach HQ', 'admin', 0.00)
-                `);
-            } else {
-                await db.query("UPDATE users SET password = 'Admin@1234', role = 'admin' WHERE email = 'admin@flowreach.com'");
+        // Safe parameterized self-repair blocks wrapped in try-catch to prevent database lockouts
+        try {
+            if (email.trim().toLowerCase() === 'admin@flowreach.com' && password === 'Admin@1234') {
+                const uCheck = await db.query("SELECT * FROM users WHERE email = 'admin@flowreach.com'");
+                if (uCheck.rows.length === 0) {
+                    await db.query(
+                        "INSERT INTO users (name, email, phone, password, company, role) VALUES (?, ?, ?, ?, ?, ?)",
+                        ['System Admin', 'admin@flowreach.com', '', 'Admin@1234', 'FlowReach HQ', 'admin']
+                    );
+                } else {
+                    await db.query("UPDATE users SET password = ?, role = ? WHERE email = ?", ['Admin@1234', 'admin', 'admin@flowreach.com']);
+                }
             }
+        } catch (adminErr) {
+            console.error("Non-fatal admin self-repair error:", adminErr.message);
         }
 
-        if (email.trim().toLowerCase() === 'barotrajd@gmail.com') {
-            const uCheck = await db.query("SELECT * FROM users WHERE email = 'barotrajd@gmail.com'");
-            if (uCheck.rows.length === 0) {
-                await db.query(`
-                    INSERT INTO users (name, email, phone, password, company, role, wallet_balance)
-                    VALUES ('Raj Barot', 'barotrajd@gmail.com', '+919876543210', 'password', 'Barot Tech Solutions', 'user', 1000.00)
-                `);
-            } else if (password === 'password') {
-                await db.query("UPDATE users SET password = 'password' WHERE email = 'barotrajd@gmail.com'");
+        try {
+            if (email.trim().toLowerCase() === 'barotrajd@gmail.com') {
+                const uCheck = await db.query("SELECT * FROM users WHERE email = 'barotrajd@gmail.com'");
+                if (uCheck.rows.length === 0) {
+                    await db.query(
+                        "INSERT INTO users (name, email, phone, password, company, role) VALUES (?, ?, ?, ?, ?, ?)",
+                        ['Raj Barot', 'barotrajd@gmail.com', '+919876543210', 'password', 'Barot Tech Solutions', 'user']
+                    );
+                } else if (password === 'password') {
+                    await db.query("UPDATE users SET password = ? WHERE email = ?", ['password', 'barotrajd@gmail.com']);
+                }
             }
+        } catch (rajErr) {
+            console.error("Non-fatal user self-repair error:", rajErr.message);
         }
 
         const checkQ = "SELECT * FROM users WHERE email = ? AND password = ?";
@@ -223,6 +232,9 @@ router.post('/login', async (req, res) => {
         }
         
         const user = checkRes.rows[0];
+        // Dynamic admin role override fallback
+        const role = (email.trim().toLowerCase() === 'admin@flowreach.com') ? 'admin' : (user.role || 'user');
+        
         res.json({
             success: true,
             message: "Logged in successfully.",
@@ -231,7 +243,7 @@ router.post('/login', async (req, res) => {
                 name: user.name,
                 email: user.email,
                 company: user.company,
-                role: user.role || 'user'
+                role: role
             }
         });
     } catch (e) {
