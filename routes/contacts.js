@@ -10,7 +10,7 @@ router.get('/', async (req, res) => {
     const userId = req.headers['x-user-id'] || 1;
     
     try {
-        let q = "SELECT * FROM contacts WHERE user_id = ?";
+        let q = "SELECT * FROM contacts WHERE business_id = ?";
         let params = [userId];
         let conditions = [];
         
@@ -50,7 +50,7 @@ router.post('/', async (req, res) => {
     
     try {
         const q = `
-            INSERT INTO contacts (user_id, name, phone, var1, var2, tag)
+            INSERT INTO contacts (business_id, name, phone, var1, var2, tag)
             VALUES (?, ?, ?, ?, ?, ?)
         `;
         const result = await db.query(q, [userId, name, phone, var1 || '', var2 || '', tag || 'Customer']);
@@ -79,7 +79,7 @@ router.post('/import', async (req, res) => {
             if (!c.phone) continue;
             
             const q = `
-                INSERT INTO contacts (user_id, name, phone, var1, var2, tag)
+                INSERT INTO contacts (business_id, name, phone, var1, var2, tag)
                 VALUES (?, ?, ?, ?, ?, ?)
             `;
             await db.query(q, [
@@ -100,31 +100,32 @@ router.post('/import', async (req, res) => {
         });
     } catch (e) {
         console.error(e);
-        res.status(500).json({ error: "Bulk contact import failed." });
+        res.status(500).json({ error: "Failed to import contacts batch." });
     }
 });
 
-// DELETE Contact by ID
-router.delete('/:id', async (req, res) => {
-    const userId = req.headers['x-user-id'] || 1;
-    const contactId = req.params.id;
-    try {
-        await db.query('DELETE FROM contacts WHERE id = ? AND user_id = ?', [contactId, userId]);
-        res.json({ success: true, message: 'Contact deleted.' });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: 'Failed to delete contact.' });
-    }
-});
-
-// DELETE Clear Database
+// DELETE Clear All Contacts
 router.delete('/clear', async (req, res) => {
+    const userId = req.headers['x-user-id'] || 1;
     try {
-        await db.query("DELETE FROM contacts");
-        res.json({ success: true, message: "Contacts database cleared successfully." });
+        await db.query("DELETE FROM contacts WHERE business_id = ?", [userId]);
+        res.json({ success: true, message: "Database cleared successfully." });
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: "Failed to clear database." });
+    }
+});
+
+// DELETE Single Contact
+router.delete('/:id', async (req, res) => {
+    const { id } = req.params;
+    const userId = req.headers['x-user-id'] || 1;
+    try {
+        await db.query("DELETE FROM contacts WHERE id = ? AND business_id = ?", [id, userId]);
+        res.json({ success: true, message: "Contact deleted." });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to delete contact." });
     }
 });
 
