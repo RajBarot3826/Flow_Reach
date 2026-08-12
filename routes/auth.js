@@ -545,8 +545,11 @@ router.post('/embedded-signup', async (req, res) => {
         const axios = require('axios');
         let accessToken = null;
 
-        // 1. Exchange OAuth code for User Access Token
-        if (appSecret && appSecret !== 'your_meta_app_secret_here') {
+        // 1. Exchange OAuth code for User Access Token (or use direct token if native)
+        if (code.startsWith('EA') || code.length > 100) {
+            // It's already a native Graph API Access Token (from flutter_facebook_auth)
+            accessToken = code;
+        } else if (appSecret && appSecret !== 'your_meta_app_secret_here') {
             try {
                 const tokenRes = await axios.get(`https://graph.facebook.com/v20.0/oauth/access_token`, {
                     params: {
