@@ -576,18 +576,30 @@ router.post('/embedded-signup', async (req, res) => {
 
         if (!finalWabaId || !finalPhoneId) {
             try {
-                const wabaRes = await axios.get(`https://graph.facebook.com/v20.0/me/whatsapp_business_accounts`, {
+                // First get businesses the user manages
+                const bizRes = await axios.get(`https://graph.facebook.com/v20.0/me/businesses`, {
                     headers: { 'Authorization': `Bearer ${accessToken}` }
                 });
-                if (wabaRes.data.data && wabaRes.data.data.length > 0) {
-                    finalWabaId = finalWabaId || wabaRes.data.data[0].id;
+                
+                if (bizRes.data.data && bizRes.data.data.length > 0) {
+                    const businessId = bizRes.data.data[0].id;
                     
-                    const phonesRes = await axios.get(`https://graph.facebook.com/v20.0/${finalWabaId}/phone_numbers`, {
+                    // Get WABAs for this business
+                    const wabaRes = await axios.get(`https://graph.facebook.com/v20.0/${businessId}/owned_whatsapp_business_accounts`, {
                         headers: { 'Authorization': `Bearer ${accessToken}` }
                     });
-                    if (phonesRes.data.data && phonesRes.data.data.length > 0) {
-                        finalPhoneId = finalPhoneId || phonesRes.data.data[0].id;
-                        connectedPhone = phonesRes.data.data[0].display_phone_number || phonesRes.data.data[0].verified_name || connectedPhone;
+                    
+                    if (wabaRes.data.data && wabaRes.data.data.length > 0) {
+                        finalWabaId = finalWabaId || wabaRes.data.data[0].id;
+                        
+                        const phonesRes = await axios.get(`https://graph.facebook.com/v20.0/${finalWabaId}/phone_numbers`, {
+                            headers: { 'Authorization': `Bearer ${accessToken}` }
+                        });
+                        
+                        if (phonesRes.data.data && phonesRes.data.data.length > 0) {
+                            finalPhoneId = finalPhoneId || phonesRes.data.data[0].id;
+                            connectedPhone = phonesRes.data.data[0].display_phone_number || phonesRes.data.data[0].verified_name || connectedPhone;
+                        }
                     }
                 }
             } catch (wabaErr) {
