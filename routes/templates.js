@@ -64,7 +64,7 @@ router.post('/', async (req, res) => {
                 headerType || 'NONE', headerText || '',
                 headerImageUrl || '', body, footer || '', serializedButtons
             ]);
-            const insertId = insertRes.rows[0].insertId;
+            const insertId = insertRes.rows[0]?.insertId || insertRes.rows[0]?.id;
             const selectRes = await db.query("SELECT * FROM templates WHERE id = ?", [insertId]);
             resultRow = selectRes.rows[0];
         }

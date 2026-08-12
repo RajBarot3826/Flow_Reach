@@ -1,0 +1,42 @@
+{
+    "memoryDb":  {
+                     "campaigns":  [
+
+                                   ],
+                     "wallet_recharges":  [
+
+                                          ],
+                     "api_configs":  [
+
+                                     ],
+                     "pending_registrations":  [
+
+                                               ],
+                     "users":  [
+
+                               ],
+                     "chat_messages":  [
+
+                                       ],
+                     "templates":  [
+
+                                   ],
+                     "businesses":  [
+
+                                    ],
+                     "contacts":  [
+
+                                  ]
+                 },
+    "idCounters":  {
+                       "campaigns":  1,
+                       "wallet_recharges":  1,
+                       "api_configs":  1,
+                       "pending_registrations":  1,
+                       "users":  1,
+                       "chat_messages":  1,
+                       "templates":  1,
+                       "businesses":  1,
+                       "contacts":  1
+                   }
+}

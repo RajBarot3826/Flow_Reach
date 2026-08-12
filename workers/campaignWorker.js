@@ -1,23 +1,15 @@
 // ================= FLOWREACH BACKGROUND CAMPAIGN WORKER =================
-// This worker pulls jobs from Redis and executes them safely, handling Meta API rate limits.
+// This worker pulls jobs from an in-memory queue and executes them safely, handling Meta API rate limits.
+// We use async.queue to handle 5000+ messages securely without requiring external Redis installation on Windows.
 
-const { Worker, Queue } = require('bullmq');
-const Redis = require('ioredis');
+const async = require('async');
 const axios = require('axios');
 const db = require('../db');
 require('dotenv').config();
 
-// Connect to Cloud Redis (Upstash) or local Redis
-const redisConnection = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
-    maxRetriesPerRequest: null,
-});
-
-// Create the Queue reference so we can export it
-const campaignQueue = new Queue('campaign-dispatch', { connection: redisConnection });
-
-// BullMQ Worker to process messages
-const worker = new Worker('campaign-dispatch', async job => {
-    const { campaignId, contact, template, user_id } = job.data;
+// Create an async queue with a concurrency limit (e.g., 50 messages per second per Meta's limit)
+const campaignQueue = async.queue(async (task, callback) => {
+    const { campaignId, contact, template, user_id } = task;
     
     console.log(`[Worker] Processing message for ${contact.phone} (Campaign ${campaignId})`);
 
@@ -25,7 +17,7 @@ const worker = new Worker('campaign-dispatch', async job => {
     let phoneId = null;
     let accessToken = null;
     
-    if (user_id) {
+    if (user_id && !global.useMemoryDb) {
         const bizRes = await db.query("SELECT * FROM businesses WHERE user_id = ?", [user_id]);
         if (bizRes.rows.length > 0) {
             phoneId = bizRes.rows[0].whatsapp_phone_number_id;
@@ -39,6 +31,7 @@ const worker = new Worker('campaign-dispatch', async job => {
     }
 
     if (!phoneId || !accessToken) {
+        console.error("[Worker Error] Meta API credentials are not configured.");
         throw new Error("Meta API credentials (Access Token or Phone ID) are not configured for this user or server.");
     }
 
@@ -80,7 +73,7 @@ const worker = new Worker('campaign-dispatch', async job => {
     try {
         // 3. Fire the request to Meta
         const response = await axios.post(
-            `https://graph.facebook.com/v19.0/${phoneId}/messages`,
+            `https://graph.facebook.com/${process.env.META_API_VERSION || 'v20.0'}/${phoneId}/messages`,
             payload,
             {
                 headers: {
@@ -92,46 +85,86 @@ const worker = new Worker('campaign-dispatch', async job => {
 
         // 4. Log the success in the database
         const msgId = response.data.messages[0].id;
-        await db.query(`
-            INSERT INTO logs (campaign_id, phone, status, message_id)
-            VALUES (?, ?, ?, ?)
-        `, [campaignId, contact.phone, 'Sent', msgId]);
+        if (!global.useMemoryDb) {
+            await db.query(`
+                INSERT INTO logs (campaign_id, phone, status, message_id)
+                VALUES (?, ?, ?, ?)
+            `, [campaignId, contact.phone, 'Sent', msgId]);
+            
+            // Update campaigns table stats
+            await db.query("UPDATE campaigns SET sent = sent + 1 WHERE id = ?", [campaignId]);
 
-        // 5. Deduct wallet balance (base rate + 30% markup per message)
-        if (user_id && !global.useMemoryDb) {
-            const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
-            const ratePerMsg = baseRate * 1.30;
-            await db.query("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?", [ratePerMsg, user_id]);
+            // 5. Deduct wallet balance (base rate + 30% markup per message)
+            if (user_id) {
+                const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
+                const ratePerMsg = baseRate * 1.30;
+                await db.query("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?", [ratePerMsg, user_id]);
+            }
         }
 
-        return { success: true, messageId: msgId };
+        // Send WebSocket update so the dispatch console shows it instantly
+        if (global.wsClients && global.wsClients.length > 0) {
+             const wsPayload = JSON.stringify({
+                 type: 'log',
+                 message: `[SENDING] Dispatched template to ${contact.name} (${contact.phone})... SUCCESS (ID: ${msgId})`
+             });
+             global.wsClients.forEach(client => {
+                 if (client.readyState === 1) client.send(wsPayload); // 1 = OPEN
+             });
+        }
         
     } catch (error) {
         console.error(`[Worker] Failed to send to ${contact.phone}:`, error.response?.data || error.message);
         
         // Log the failure
-        await db.query(`
-            INSERT INTO logs (campaign_id, phone, status, message_id)
-            VALUES (?, ?, ?, ?)
-        `, [campaignId, contact.phone, 'Failed', null]);
-        
-        // Throwing error allows BullMQ to retry if configured
-        throw new Error(error.response?.data?.error?.message || error.message);
+        if (!global.useMemoryDb) {
+            await db.query(`
+                INSERT INTO logs (campaign_id, phone, status, message_id)
+                VALUES (?, ?, ?, ?)
+            `, [campaignId, contact.phone, 'Failed', null]);
+            
+            await db.query("UPDATE campaigns SET failed = failed + 1 WHERE id = ?", [campaignId]);
+        }
+
+        // Send WebSocket error log
+        if (global.wsClients && global.wsClients.length > 0) {
+             const wsPayload = JSON.stringify({
+                 type: 'log',
+                 message: `[ERROR] Failed dispatch to ${contact.name}: ${error.response?.data?.error?.message || error.message}`
+             });
+             global.wsClients.forEach(client => {
+                 if (client.readyState === 1) client.send(wsPayload); // 1 = OPEN
+             });
+        }
     }
-}, {
-    connection: redisConnection,
-    limiter: {
-        max: 50, // Meta's limit: Max 50 messages per second per phone number
-        duration: 1000
+    
+    // Add artificial delay to respect Meta API limits safely
+    await new Promise(resolve => setTimeout(resolve, parseInt(process.env.SEND_DELAY_MS || '1200')));
+    
+    // Call callback to signal job is done
+    if (callback) callback();
+
+}, 50); // Concurrency limit
+
+campaignQueue.error((err, task) => {
+    console.error(`[Worker Queue Error] Failed to process task for ${task.contact.phone}`, err);
+});
+
+campaignQueue.drain(() => {
+    console.log('[Worker] All items in the campaign queue have been processed.');
+    if (global.wsClients && global.wsClients.length > 0) {
+        const wsPayload = JSON.stringify({ type: 'log', message: `[SYSTEM] Broadcast queue processing completed.` });
+        global.wsClients.forEach(client => {
+            if (client.readyState === 1) client.send(wsPayload);
+        });
     }
 });
 
-worker.on('completed', (job) => {
-    // console.log(`Job ${job.id} has completed!`);
-});
+// Wrapper to match BullMQ 'add' API signature roughly for drop-in replacement
+const queueWrapper = {
+    add: async (jobName, data) => {
+        campaignQueue.push(data);
+    }
+};
 
-worker.on('failed', (job, err) => {
-    console.error(`Job ${job.id} has failed with ${err.message}`);
-});
-
-module.exports = { campaignQueue, worker };
+module.exports = { campaignQueue: queueWrapper };

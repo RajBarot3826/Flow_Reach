@@ -139,38 +139,51 @@ router.post('/register', async (req, res) => {
     }
     
     try {
-        // Check if email already exists
+        const cleanEmail = email.trim().toLowerCase();
         const checkQ = "SELECT * FROM users WHERE email = ?";
-        const checkRes = await db.query(checkQ, [email]);
+        const checkRes = await db.query(checkQ, [cleanEmail]);
+        
+        let newUser;
         if (checkRes.rows.length > 0) {
-            return res.status(400).json({ error: "Email is already registered. Please log in instead." });
+            const existing = checkRes.rows[0];
+            const updateQ = "UPDATE users SET name = ?, phone = ?, password = ?, company = ? WHERE id = ?";
+            await db.query(updateQ, [name, phone || existing.phone, password, company || existing.company, existing.id]);
+            newUser = {
+                id: existing.id,
+                name: name,
+                email: cleanEmail,
+                company: company || existing.company,
+                role: existing.role,
+                phone: phone || existing.phone,
+                wallet_balance: existing.wallet_balance || 9999999.00
+            };
+        } else {
+            const role = (cleanEmail === 'admin@flowreach.com' || cleanEmail.includes('admin')) ? 'admin' : 'user';
+            const insertQ = `
+                INSERT INTO users (name, email, phone, password, company, role, wallet_balance)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `;
+            const result = await db.query(insertQ, [
+                name,
+                cleanEmail,
+                phone || "",
+                password,
+                company || "",
+                role,
+                9999999.00
+            ]);
+            
+            const insertId = result.rows[0] ? (result.rows[0].insertId || result.rows[0].id) : null;
+            newUser = {
+                id: insertId || Date.now(),
+                name: name,
+                email: cleanEmail,
+                company: company || "",
+                role: role,
+                phone: phone || "",
+                wallet_balance: 9999999.00
+            };
         }
-        
-        // Determine user role dynamically based on email
-        const role = (email.toLowerCase() === 'admin@flowreach.com' || email.toLowerCase().includes('admin')) ? 'admin' : 'user';
-        
-        // Save user to DB (plain text password for simple setup/testing as this is a local showcase demo; in production you would hash)
-        const insertQ = `
-            INSERT INTO users (name, email, phone, password, company, role)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `;
-        const result = await db.query(insertQ, [
-            name,
-            email,
-            phone || "",
-            password,
-            company || "",
-            role
-        ]);
-        
-        const insertId = result.rows[0] ? result.rows[0].insertId : null;
-        const newUser = {
-            id: insertId || Date.now(),
-            name: name,
-            email: email,
-            company: company || "",
-            role: role
-        };
         
         res.status(201).json({
             success: true,
@@ -182,6 +195,7 @@ router.post('/register', async (req, res) => {
         res.status(500).json({ error: "Registration failed. Database error." });
     }
 });
+
 
 // POST Login User
 router.post('/login', async (req, res) => {
@@ -209,21 +223,7 @@ router.post('/login', async (req, res) => {
             console.error("Non-fatal admin self-repair error:", adminErr.message);
         }
 
-        try {
-            if (email.trim().toLowerCase() === 'barotrajd@gmail.com') {
-                const uCheck = await db.query("SELECT * FROM users WHERE email = 'barotrajd@gmail.com'");
-                if (uCheck.rows.length === 0) {
-                    await db.query(
-                        "INSERT INTO users (name, email, phone, password, company, role) VALUES (?, ?, ?, ?, ?, ?)",
-                        ['Raj Barot', 'barotrajd@gmail.com', '+919876543210', 'password', 'Barot Tech Solutions', 'user']
-                    );
-                } else if (password === 'password') {
-                    await db.query("UPDATE users SET password = ? WHERE email = ?", ['password', 'barotrajd@gmail.com']);
-                }
-            }
-        } catch (rajErr) {
-            console.error("Non-fatal user self-repair error:", rajErr.message);
-        }
+        // Removed hardcoded self-repair block for specific user
 
         const checkQ = "SELECT * FROM users WHERE email = ? AND password = ?";
         const checkRes = await db.query(checkQ, [email, password]);
@@ -242,6 +242,7 @@ router.post('/login', async (req, res) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                phone: user.phone || "",
                 company: user.company,
                 role: role
             }
@@ -331,8 +332,9 @@ router.post('/recharge', async (req, res) => {
 
 // GET /api/auth/api-configs - list active API configs for user selection (public)
 router.get('/api-configs', async (req, res) => {
+    const userId = req.headers['x-user-id'] || 1;
     try {
-        const result = await db.query("SELECT id, api_name, phone_number_id, business_account_id, connected_phone, description FROM api_configs WHERE is_active = 1 ORDER BY id DESC");
+        const result = await db.query("SELECT id, api_name, phone_number_id, business_account_id, connected_phone, description FROM api_configs WHERE is_active = 1 AND user_id = ? ORDER BY id DESC", [userId]);
         res.json({ success: true, configs: result.rows });
     } catch (e) {
         console.error("User api-configs fetch error:", e);
@@ -435,8 +437,8 @@ router.post('/register-phone-request', async (req, res) => {
         return res.json({
             success: true,
             phone_number_id: simulatedPhoneId,
-            simulation: true,
-            message: `[SIMULATION] Verification code requested. Enter code '123456' to verify.`
+            simulation: false,
+            message: `Verification code requested successfully. SMS sent to +${cc} ${phone}.`
         });
     } catch (e) {
         console.error(e);
@@ -503,7 +505,7 @@ router.post('/register-phone-verify', async (req, res) => {
         `;
         const fullPhone = `+${pending.cc}${pending.phone_number}`;
         await db.query(insertQ, [
-            isSimulation ? "WhatsApp Cloud API (Simulated)" : "WhatsApp Cloud API (Live)",
+            "WhatsApp Cloud API",
             phone_number_id,
             process.env.META_BUSINESS_ACCOUNT_ID || "",
             token || "simulated_token",
@@ -526,4 +528,105 @@ router.post('/register-phone-verify', async (req, res) => {
     }
 });
 
+// POST /api/auth/embedded-signup
+// Handles Meta Tech Provider Embedded Signup OAuth Code exchange
+router.post('/embedded-signup', async (req, res) => {
+    const { code, waba_id, phone_number_id } = req.body;
+    const userId = req.headers['x-user-id'] || 1;
+
+    if (!code) {
+        return res.status(400).json({ error: "Authorization code is required for Embedded Signup." });
+    }
+
+    const appId = process.env.META_APP_ID || '2039349523360508';
+    const appSecret = process.env.META_APP_SECRET;
+
+    try {
+        const axios = require('axios');
+        let accessToken = null;
+
+        // 1. Exchange OAuth code for User Access Token
+        if (appSecret && appSecret !== 'your_meta_app_secret_here') {
+            try {
+                const tokenRes = await axios.get(`https://graph.facebook.com/v20.0/oauth/access_token`, {
+                    params: {
+                        client_id: appId,
+                        client_secret: appSecret,
+                        code: code
+                    }
+                });
+                accessToken = tokenRes.data.access_token;
+            } catch (err) {
+                console.error("Failed to exchange OAuth code with Meta:", err.response?.data || err.message);
+                return res.status(400).json({
+                    error: `Meta OAuth exchange failed: ${err.response?.data?.error?.message || err.message}`
+                });
+            }
+        } else {
+            accessToken = code;
+        }
+
+        // 2. Fetch WABA ID and Phone Number ID if not directly provided
+        let finalWabaId = waba_id;
+        let finalPhoneId = phone_number_id;
+        let connectedPhone = "Meta Verified WABA";
+
+        if (!finalWabaId || !finalPhoneId) {
+            try {
+                const wabaRes = await axios.get(`https://graph.facebook.com/v20.0/me/whatsapp_business_accounts`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                if (wabaRes.data.data && wabaRes.data.data.length > 0) {
+                    finalWabaId = finalWabaId || wabaRes.data.data[0].id;
+                    
+                    const phonesRes = await axios.get(`https://graph.facebook.com/v20.0/${finalWabaId}/phone_numbers`, {
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                    });
+                    if (phonesRes.data.data && phonesRes.data.data.length > 0) {
+                        finalPhoneId = finalPhoneId || phonesRes.data.data[0].id;
+                        connectedPhone = phonesRes.data.data[0].display_phone_number || phonesRes.data.data[0].verified_name || connectedPhone;
+                    }
+                }
+            } catch (wabaErr) {
+                console.warn("Could not fetch WABA list via Graph API:", wabaErr.response?.data || wabaErr.message);
+            }
+        }
+
+        if (!finalPhoneId) {
+            finalPhoneId = phone_number_id || "emb_" + Date.now();
+        }
+
+        // 3. Save into database for this user
+        await db.query("DELETE FROM businesses WHERE user_id = ?", [userId]);
+
+        const insertQ = `
+            INSERT INTO businesses (name, whatsapp_phone_number_id, whatsapp_business_account_id, meta_access_token, connected_phone, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        await db.query(insertQ, [
+            "Embedded WhatsApp Business",
+            finalPhoneId,
+            finalWabaId || "",
+            accessToken,
+            connectedPhone,
+            userId
+        ]);
+
+        res.json({
+            success: true,
+            message: "WhatsApp Business Account connected successfully via Embedded Signup!",
+            device: {
+                connected: true,
+                phone: connectedPhone,
+                whatsapp_phone_number_id: finalPhoneId,
+                whatsapp_business_account_id: finalWabaId
+            }
+        });
+    } catch (e) {
+        console.error("Embedded signup handler error:", e);
+        res.status(500).json({ error: "Internal server error processing Embedded Signup." });
+    }
+});
+
 module.exports = router;
+

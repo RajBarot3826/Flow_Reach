@@ -7,10 +7,11 @@ const db = require('../db');
 // GET Contacts List (Supports filters: tag, search)
 router.get('/', async (req, res) => {
     const { tag, search } = req.query;
+    const userId = req.headers['x-user-id'] || 1;
     
     try {
-        let q = "SELECT * FROM contacts";
-        let params = [];
+        let q = "SELECT * FROM contacts WHERE user_id = ?";
+        let params = [userId];
         let conditions = [];
         
         if (tag && tag !== 'all') {
@@ -25,7 +26,7 @@ router.get('/', async (req, res) => {
         }
         
         if (conditions.length > 0) {
-            q += " WHERE " + conditions.join(" AND ");
+            q += " AND " + conditions.join(" AND ");
         }
         
         q += " ORDER BY id DESC";
@@ -41,6 +42,7 @@ router.get('/', async (req, res) => {
 // POST Add Single Contact
 router.post('/', async (req, res) => {
     const { name, phone, var1, var2, tag } = req.body;
+    const userId = req.headers['x-user-id'] || 1;
     
     if (!name || !phone) {
         return res.status(400).json({ error: "Name and Phone number are required." });
@@ -48,10 +50,10 @@ router.post('/', async (req, res) => {
     
     try {
         const q = `
-            INSERT INTO contacts (name, phone, var1, var2, tag)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO contacts (user_id, name, phone, var1, var2, tag)
+            VALUES (?, ?, ?, ?, ?, ?)
         `;
-        const result = await db.query(q, [name, phone, var1 || '', var2 || '', tag || 'Customer']);
+        const result = await db.query(q, [userId, name, phone, var1 || '', var2 || '', tag || 'Customer']);
         
         const insertId = result.rows[0].insertId;
         const selectResult = await db.query("SELECT * FROM contacts WHERE id = ?", [insertId]);
@@ -65,6 +67,7 @@ router.post('/', async (req, res) => {
 // POST Bulk Import Contacts (Array upload from sheet)
 router.post('/import', async (req, res) => {
     const { contacts } = req.body;
+    const userId = req.headers['x-user-id'] || 1;
     
     if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
         return res.status(400).json({ error: "Invalid contacts list payload." });
@@ -76,10 +79,11 @@ router.post('/import', async (req, res) => {
             if (!c.phone) continue;
             
             const q = `
-                INSERT INTO contacts (name, phone, var1, var2, tag)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO contacts (user_id, name, phone, var1, var2, tag)
+                VALUES (?, ?, ?, ?, ?, ?)
             `;
             await db.query(q, [
+                userId,
                 c.name || 'Unknown',
                 c.phone,
                 c.var1 || '',
@@ -97,6 +101,19 @@ router.post('/import', async (req, res) => {
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: "Bulk contact import failed." });
+    }
+});
+
+// DELETE Contact by ID
+router.delete('/:id', async (req, res) => {
+    const userId = req.headers['x-user-id'] || 1;
+    const contactId = req.params.id;
+    try {
+        await db.query('DELETE FROM contacts WHERE id = ? AND user_id = ?', [contactId, userId]);
+        res.json({ success: true, message: 'Contact deleted.' });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to delete contact.' });
     }
 });
 

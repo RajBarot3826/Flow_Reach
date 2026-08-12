@@ -25,8 +25,7 @@ if (process.env.DATABASE_URL) {
         port: parseInt(process.env.DB_PORT || '3306'),
         user: process.env.DB_USER || 'root',
         password: process.env.DB_PASSWORD || '',
-        database: process.env.DB_DATABASE || 'flowreach',
-        ssl: { rejectUnauthorized: true }
+        database: process.env.DB_DATABASE || 'flowreach'
     };
 }
 
@@ -35,17 +34,10 @@ global.useMemoryDb = false;
 
 // Simulated Memory Database Arrays (MySQL-aligned values)
 global.memoryDb = {
-    users: [
-        { id: 1, name: "TEST USER", email: "user@flowreach.com", phone: "+919988776655", password: "password", company: "FlowReach Enterprise Partner", role: "user", wallet_balance: 500.00 },
-        { id: 2, name: "System Admin", email: "admin@flowreach.com", phone: "", password: "Admin@1234", company: "FlowReach HQ", role: "admin", wallet_balance: 0.00 },
-        { id: 3, name: "Raj Barot", email: "barotrajd@gmail.com", phone: "+919876543210", password: "password", company: "Barot Tech Solutions", role: "user", wallet_balance: 1000.00 }
-    ],
+    users: [],
     businesses: [],
-    contacts: [
-        { id: 1, name: "Raj Patel", phone: "+919876543210", var1: "FLOWREACH50", var2: "July 20", tag: "Customer" },
-        { id: 2, name: "Amit Shah", phone: "+919123456789", var1: "SAVE10", var2: "July 25", tag: "Lead" },
-        { id: 3, name: "Neha Sharma", phone: "+919000180002", var1: "GOLDVIP", var2: "Aug 01", tag: "VIP" }
-    ],
+    contacts: [],
+    pending_registrations: [],
     templates: [
         { id: 1, name: "hello_world", category: "UTILITY", language: "en_US", header_type: "TEXT", header_text: "Hello World", header_image_url: "", body: "Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification from the Cloud API, hosted by Meta. Thank you for taking the time to test with us.", footer: "WhatsApp Business Platform sample message", buttons: "[]", status: "APPROVED" },
         { id: 2, name: "jaspers_market_order_confirmation_v1", category: "UTILITY", language: "en_US", header_type: "TEXT", header_text: "Order confirmed", header_image_url: "", body: "Hi {{1}},\n\nThank you for your purchase! Your order number is {{2}}.\n\nWe will start getting your farm fresh groceries ready to ship.\n\nEstimated delivery: {{3}}.\n\nWe will let you know when your order ships.", footer: "developers.facebook.com", buttons: JSON.stringify([{ type: 'URL', text: 'Visit order details', value: 'https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates/utility-templates' }]), status: "APPROVED" },
@@ -58,7 +50,24 @@ global.memoryDb = {
 };
 
 // Auto-increment IDs counter for Memory DB
-let idCounters = { users: 4, businesses: 1, contacts: 4, templates: 2, campaigns: 1, chat_messages: 1, wallet_recharges: 1, api_configs: 1 };
+let idCounters = { users: 1, businesses: 1, contacts: 1, pending_registrations: 1, templates: 4, campaigns: 1, chat_messages: 1, wallet_recharges: 1, api_configs: 1 };
+
+const fs = require('fs');
+const dbFile = './memory_db.json';
+function loadMemoryDb() { 
+    if(fs.existsSync(dbFile)){
+        try { 
+            const data = JSON.parse(fs.readFileSync(dbFile, 'utf8')); 
+            global.memoryDb = data.memoryDb || global.memoryDb; 
+            idCounters = data.idCounters || idCounters; 
+            console.log('🌱  [DATABASE] Loaded persistent memory state from memory_db.json.');
+        } catch(e) {}
+    } 
+}
+function saveMemoryDb() { 
+    fs.writeFileSync(dbFile, JSON.stringify({memoryDb: global.memoryDb, idCounters}, null, 2)); 
+}
+loadMemoryDb();
 
 async function connectDatabase() {
     try {
@@ -136,6 +145,7 @@ async function runAutoMigrations() {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS contacts (
                 id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT DEFAULT 1,
                 business_id INT,
                 name VARCHAR(255) NOT NULL,
                 phone VARCHAR(50) NOT NULL,
@@ -250,6 +260,7 @@ async function runAutoMigrations() {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS api_configs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT DEFAULT 1,
                 api_name VARCHAR(255) NOT NULL,
                 phone_number_id VARCHAR(100) NOT NULL,
                 business_account_id VARCHAR(100),
@@ -347,15 +358,23 @@ async function query(text, params = []) {
         }
         else if (sqlLower.includes('from contacts')) {
             rows = [...global.memoryDb.contacts];
-            if (sqlLower.includes('tag = ?') && params.length > 0) {
-                const tagFilter = params[0];
+            let paramIdx = 0;
+            if (sqlLower.includes('user_id = ?') && params.length > paramIdx) {
+                const uId = parseInt(params[paramIdx]);
+                rows = rows.filter(c => c.user_id === uId);
+                paramIdx++;
+            }
+            if (sqlLower.includes('tag = ?') && params.length > paramIdx) {
+                const tagFilter = params[paramIdx];
                 if (tagFilter && tagFilter !== 'all') {
                     rows = rows.filter(c => c.tag === tagFilter);
                 }
+                paramIdx++;
             }
-            if (sqlLower.includes('id = ?') && params.length > 0) {
-                const searchId = parseInt(params[0]);
+            if (sqlLower.includes('id = ?') && params.length > paramIdx) {
+                const searchId = parseInt(params[paramIdx]);
                 rows = rows.filter(c => c.id === searchId);
+                paramIdx++;
             }
         } 
         else if (sqlLower.includes('from templates')) {
@@ -437,13 +456,14 @@ async function query(text, params = []) {
     else if (sqlLower.startsWith('insert into')) {
         if (sqlLower.includes('into contacts')) {
             const id = idCounters.contacts++;
-            const name = params[0] || '';
-            const phone = params[1] || '';
-            const var1 = params[2] || '';
-            const var2 = params[3] || '';
-            const tag = params[4] || 'Customer';
+            const user_id = parseInt(params[0]);
+            const name = params[1] || '';
+            const phone = params[2] || '';
+            const var1 = params[3] || '';
+            const var2 = params[4] || '';
+            const tag = params[5] || 'Customer';
             
-            const newRow = { id, name, phone, var1, var2, tag };
+            const newRow = { id, user_id, name, phone, var1, var2, tag };
             global.memoryDb.contacts.push(newRow);
             rows = [{ insertId: id, ...newRow }]; // Emulate insertId returning property
         } 
@@ -510,8 +530,9 @@ async function query(text, params = []) {
             const whatsapp_business_account_id = params[2] || '';
             const meta_access_token = params[3] || '';
             const connected_phone = params[4] || '';
+            const user_id = parseInt(params[5] || '0');
             
-            const newRow = { id, name, whatsapp_phone_number_id, whatsapp_business_account_id, meta_access_token, connected_phone };
+            const newRow = { id, user_id, name, whatsapp_phone_number_id, whatsapp_business_account_id, meta_access_token, connected_phone };
             global.memoryDb.businesses.push(newRow);
             rows = [{ insertId: id, ...newRow }];
         }

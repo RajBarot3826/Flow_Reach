@@ -8,6 +8,7 @@
     "test": "node test_api.js"
   },
   "dependencies": {
+    "async": "^3.2.6",
     "axios": "^1.18.1",
     "bullmq": "^5.80.3",
     "cors": "^2.8.5",

@@ -99,15 +99,15 @@ async function runDiagnostics() {
         // 8. Test Campaign Wizard Launch
         const launchRes = await fetch(`${BASE_URL}/campaigns/launch`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-user-id': '1' },
             body: JSON.stringify({
                 name: "Diagnostics_Test_Campaign",
-                templateName: "festival_promo_2026",
+                templateName: "hello_world",
                 audienceTag: "VIP"
             })
         });
         const launchData = await launchRes.json();
-        assert(launchRes.ok && launchData.success === true, "Campaign wizard launch & simulation dispatcher trigger passed.", "Campaign launch failed.");
+        assert(launchRes.ok && launchData.success === true, "Campaign wizard launch & simulation dispatcher trigger passed.", `Campaign launch failed: ${launchData.error || launchRes.statusText}`);
         
         // 9. Test Live Inbox Chats Transcript
         const chatsRes = await fetch(`${BASE_URL}/chats`);

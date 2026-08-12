@@ -31,11 +31,12 @@ router.post('/launch', async (req, res) => {
         }
         const tpl = tplResult.rows[0];
         
-        // 2. Fetch target audience list
-        let contactsQ = "SELECT * FROM contacts";
-        let contactsParams = [];
+        // 2. Fetch target audience list (scoped to user)
+        const userId = req.headers['x-user-id'] || req.body.userId;
+        let contactsQ = "SELECT * FROM contacts WHERE user_id = ?";
+        let contactsParams = [userId];
         if (audienceTag !== 'all') {
-            contactsQ += " WHERE tag = ?";
+            contactsQ += " AND tag = ?";
             contactsParams.push(audienceTag);
         }
         const contactsResult = await db.query(contactsQ, contactsParams);
@@ -46,7 +47,6 @@ router.post('/launch', async (req, res) => {
         }
         
         // Check user wallet balance (Requires base rate + 30% markup per message)
-        const userId = req.headers['x-user-id'] || req.body.userId;
         let user = null;
         if (userId) {
             const userRes = await db.query("SELECT * FROM users WHERE id = ?", [userId]);
@@ -85,7 +85,7 @@ router.post('/launch', async (req, res) => {
             userId || null
         ]);
         
-        const insertId = insertRes.rows[0].insertId;
+        const insertId = insertRes.rows[0]?.insertId || insertRes.rows[0]?.id;
         const selectRes = await db.query("SELECT * FROM campaigns WHERE id = ?", [insertId]);
         const campaign = selectRes.rows[0];
         
@@ -98,23 +98,17 @@ router.post('/launch', async (req, res) => {
             });
         }
         
-        // --- REAL WORLD SAAS: Add to Redis Queue ---
-        try {
-            const { campaignQueue } = require('../workers/campaignWorker');
-            for (let contact of contacts) {
-                await campaignQueue.add('send-message', {
-                    campaignId: campaign.id,
-                    contact: contact,
-                    template: tpl,
-                    user_id: userId
-                });
-            }
-        } catch (queueErr) {
-            console.error("Queue connection failed, ensure Redis is running or use mock.", queueErr.message);
-            // Fallback for local testing if redis fails
-            setTimeout(() => {
-                runBackgroundBroadcast(campaign.id, contacts, tpl, biz, userId);
-            }, 1000);
+        // --- Launch broadcast via Async Queue ---
+        const { campaignQueue } = require('../workers/campaignWorker');
+        sendWsUpdate({ type: 'log', message: `[SYSTEM] Broadcast Queue started for Campaign #${campaign.id}. Queuing ${contacts.length} jobs.` });
+        
+        for (let contact of contacts) {
+            campaignQueue.add('send-message', {
+                campaignId: campaign.id,
+                contact: contact,
+                template: tpl,
+                user_id: userId
+            });
         }
         
         res.status(201).json({
@@ -129,136 +123,7 @@ router.post('/launch', async (req, res) => {
     }
 });
 
-// BACKGROUND Sequential Sender Loop
-async function runBackgroundBroadcast(campaignId, contacts, tpl, biz, userId) {
-    let sent = 0;
-    let delivered = 0;
-    let read = 0;
-    let failed = 0;
-    
-    sendWsUpdate({ type: 'log', message: `[SYSTEM] Broadcast Queue started for Campaign #${campaignId}. Processing ${contacts.length} targets.` });
-    
-    for (let index = 0; index < contacts.length; index++) {
-        const contact = contacts[index];
-        sendWsUpdate({
-            type: 'log',
-            message: `[SENDING] Node ${index+1}/${contacts.length}: Dispatching template to ${contact.name} (${contact.phone})...`
-        });
-        
-        let success = false;
-        
-        // Query user-specific credentials if they exist
-        let masterPhoneId = null;
-        let masterToken = null;
-        
-        if (userId) {
-            try {
-                const bizRes = await db.query("SELECT * FROM businesses WHERE user_id = ?", [userId]);
-                if (bizRes.rows.length > 0) {
-                    masterPhoneId = bizRes.rows[0].whatsapp_phone_number_id;
-                    masterToken = bizRes.rows[0].meta_access_token;
-                }
-            } catch (dbErr) {
-                console.error("DB error fetching credentials:", dbErr.message);
-            }
-        }
-        
-        if (!masterPhoneId || !masterToken) {
-            masterToken = process.env.META_ACCESS_TOKEN;
-            masterPhoneId = process.env.META_PHONE_NUMBER_ID;
-        }
-        
-        if (masterToken && masterPhoneId && masterToken !== 'your_system_user_token_here') {
-            success = await callMetaCloudAPI(contact, tpl, masterToken, masterPhoneId);
-        } else {
-            sendWsUpdate({ type: 'log', message: `[ERROR] Node ${contact.name}: Dispatch failed. Master platform API credentials not configured in backend.` });
-            success = false;
-        }
-        
-        sent++;
-        
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        if (success) {
-            delivered++;
-            
-            // Deduct base rate + 30% markup per successfully delivered message from user balance on the server!
-            if (userId) {
-                try {
-                    const baseRate = parseFloat(process.env.BILLING_RATE_PER_MSG || '1.00');
-                    const ratePerMsg = baseRate * 1.30;
-                    await db.query("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?", [ratePerMsg, userId]);
-                } catch (walletErr) {
-                    console.error("⚠️ [WALLET DEDUCTION ERROR] Failed to deduct balance:", walletErr.message);
-                }
-            }
 
-            sendWsUpdate({ type: 'log', message: `[STATUS] Node ${contact.name}: Delivered successfully.` });
-            
-            // Log outgoing message to chat_messages table
-            let bodyText = tpl.body
-                .replace(/\{\{1\}\}/g, contact.name)
-                .replace(/\{\{2\}\}/g, contact.var1 || 'PROMO10')
-                .replace(/\{\{3\}\}/g, contact.var2 || 'Tomorrow');
-            
-            const chatRes = await db.query(`
-                INSERT INTO chat_messages (contact_phone, sender, text, time_str, unread)
-                VALUES (?, ?, ?, ?, FALSE)
-            `, [contact.phone, 'me', bodyText, timeStr]);
-            
-            const insertId = chatRes.rows[0].insertId;
-            const selectRes = await db.query("SELECT * FROM chat_messages WHERE id = ?", [insertId]);
-            const savedMsg = selectRes.rows[0];
-            
-            // Send socket event to refresh inbox list
-            sendWsUpdate({
-                type: 'chat_event',
-                phone: contact.phone,
-                message: savedMsg
-            });
-            
-            // Read rate trigger (75%)
-            const isRead = Math.random() < 0.75;
-            if (isRead) {
-                read++;
-                setTimeout(() => {
-                    sendWsUpdate({ type: 'log', message: `[STATUS] Node ${contact.name}: Message read (Blue Ticks).` });
-                }, 500);
-            }
-            
-            // Inbound User Reply Trigger (30%)
-            const isReply = Math.random() < 0.30;
-            if (isReply) {
-                scheduleSimulatedUserReply(contact, timeStr);
-            }
-            
-        } else {
-            failed++;
-            sendWsUpdate({ type: 'log', message: `[ERROR] Node ${contact.name}: Dispatch failed. Destination network timeout.` });
-        }
-        
-        // Push progress to connected WebSockets
-        sendWsUpdate({
-            type: 'progress',
-            campaignId,
-            sent,
-            delivered,
-            read,
-            failed,
-            total: contacts.length
-        });
-    }
-    
-    // Save final stats to DB
-    const finalQ = `
-        UPDATE campaigns 
-        SET sent = ?, delivered = ?, \`read\` = ?, failed = ?, status = 'Completed'
-        WHERE id = ?
-    `;
-    await db.query(finalQ, [sent, delivered, read, failed, campaignId]);
-    sendWsUpdate({ type: 'log', message: `[SYSTEM] Campaign #${campaignId} broadcast processing complete.` });
-}
 
 // Meta WhatsApp Cloud API HTTP Client Caller
 async function callMetaCloudAPI(contact, tpl, masterToken, masterPhoneId) {
