@@ -284,6 +284,18 @@ async function runAutoMigrations() {
             );
         `);
 
+        // 10. Create campaign_logs table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS campaign_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                campaign_id INT NOT NULL,
+                phone VARCHAR(50) NOT NULL,
+                status VARCHAR(20) DEFAULT 'Pending',
+                message_id VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
         console.log("🛠️  [DATABASE MIGRATIONS] Check finished. Tables verified successfully.\n");
         
         // Seed default templates if empty

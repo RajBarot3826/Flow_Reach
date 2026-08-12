@@ -7,7 +7,8 @@ const db = require('../db');
 // GET Campaign History list
 router.get('/', async (req, res) => {
     try {
-        const result = await db.query("SELECT * FROM campaigns ORDER BY id DESC");
+        const userId = req.headers['x-user-id'];
+        const result = await db.query("SELECT * FROM campaigns WHERE user_id = ? ORDER BY id DESC", [userId]);
         res.json(result.rows);
     } catch (e) {
         console.error(e);
@@ -33,7 +34,7 @@ router.post('/launch', async (req, res) => {
         
         // 2. Fetch target audience list (scoped to user)
         const userId = req.headers['x-user-id'] || req.body.userId;
-        let contactsQ = "SELECT * FROM contacts WHERE user_id = ?";
+        let contactsQ = "SELECT * FROM contacts WHERE business_id = ?";
         let contactsParams = [userId];
         if (audienceTag !== 'all') {
             contactsQ += " AND tag = ?";

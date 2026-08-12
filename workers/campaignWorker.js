@@ -87,7 +87,7 @@ const campaignQueue = async.queue(async (task, callback) => {
         const msgId = response.data.messages[0].id;
         if (!global.useMemoryDb) {
             await db.query(`
-                INSERT INTO logs (campaign_id, phone, status, message_id)
+                INSERT INTO campaign_logs (campaign_id, phone, status, message_id)
                 VALUES (?, ?, ?, ?)
             `, [campaignId, contact.phone, 'Sent', msgId]);
             
@@ -119,7 +119,7 @@ const campaignQueue = async.queue(async (task, callback) => {
         // Log the failure
         if (!global.useMemoryDb) {
             await db.query(`
-                INSERT INTO logs (campaign_id, phone, status, message_id)
+                INSERT INTO campaign_logs (campaign_id, phone, status, message_id)
                 VALUES (?, ?, ?, ?)
             `, [campaignId, contact.phone, 'Failed', null]);
             
