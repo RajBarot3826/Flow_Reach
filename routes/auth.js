@@ -130,6 +130,22 @@ router.post('/disconnect', async (req, res) => {
     }
 });
 
+// GET Emergency Wipe
+router.get('/emergency-wipe', async (req, res) => {
+    try {
+        await db.query('SET FOREIGN_KEY_CHECKS = 0;').catch(() => {}); // Catch in case memory DB doesn't support it
+        const tables = ['businesses', 'contacts', 'templates', 'campaigns', 'chat_messages', 'users', 'wallet_recharges', 'api_configs', 'pending_registrations', 'campaign_logs'];
+        for(let t of tables) {
+            await db.query(`DELETE FROM ${t}`);
+        }
+        await db.query('SET FOREIGN_KEY_CHECKS = 1;').catch(() => {});
+        res.json({ success: true, message: "100% WIPED! ALL RENDER DATA CLEARED!" });
+    } catch (e) {
+        res.status(500).json({ error: e.toString() });
+    }
+});
+
+
 // POST Register User
 router.post('/register', async (req, res) => {
     const { name, email, phone, password, company } = req.body;
