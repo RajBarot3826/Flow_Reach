@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
 
 // POST Launch Campaign Broadcast
 router.post('/launch', async (req, res) => {
-    const { name, templateName, audienceTag, scheduledTime } = req.body;
+    const { name, templateName, audienceTag, scheduledTime, whatsapp_phone_number_id } = req.body;
     
     if (!name || !templateName || !audienceTag) {
         return res.status(400).json({ error: "Missing campaign name, template, or audience parameters." });
@@ -108,7 +108,8 @@ router.post('/launch', async (req, res) => {
                 campaignId: campaign.id,
                 contact: contact,
                 template: tpl,
-                user_id: userId
+                user_id: userId,
+                phoneId: whatsapp_phone_number_id || null
             });
         }
         

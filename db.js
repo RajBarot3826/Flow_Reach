@@ -430,6 +430,17 @@ async function query(text, params = []) {
         }
         else if (sqlLower.includes('from businesses')) {
             rows = [...global.memoryDb.businesses];
+            if (sqlLower.includes('user_id = ?') && sqlLower.includes('whatsapp_phone_number_id = ?')) {
+                const uId = parseInt(params[0]);
+                const pId = params[1];
+                rows = rows.filter(b => b.user_id === uId && b.whatsapp_phone_number_id === pId);
+            } else if (sqlLower.includes('whatsapp_phone_number_id = ?')) {
+                const pId = params[0];
+                rows = rows.filter(b => b.whatsapp_phone_number_id === pId);
+            } else if (sqlLower.includes('user_id = ?')) {
+                const uId = parseInt(params[0]);
+                rows = rows.filter(b => b.user_id === uId);
+            }
         }
         else if (sqlLower.includes('from api_configs')) {
             rows = [...global.memoryDb.api_configs];

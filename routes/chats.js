@@ -71,7 +71,7 @@ router.get('/:phone', async (req, res) => {
 
 // POST Send manual message from dashboard console
 router.post('/send', async (req, res) => {
-    const { phone, text } = req.body;
+    const { phone, text, whatsapp_phone_number_id } = req.body;
     const userId = req.headers['x-user-id'] || 1;
     
     if (!phone || !text) {
@@ -80,10 +80,22 @@ router.post('/send', async (req, res) => {
     
     try {
         // 1. Fetch user credentials
-        let phoneId = null;
+        let phoneId = whatsapp_phone_number_id || null;
         let accessToken = null;
         
-        if (!global.useMemoryDb) {
+        if (phoneId) {
+            const bizRes = await db.query("SELECT * FROM businesses WHERE user_id = ? AND whatsapp_phone_number_id = ?", [userId, phoneId]);
+            if (bizRes.rows.length > 0) {
+                accessToken = bizRes.rows[0].meta_access_token;
+            } else {
+                const bizRes2 = await db.query("SELECT * FROM businesses WHERE whatsapp_phone_number_id = ?", [phoneId]);
+                if (bizRes2.rows.length > 0) {
+                    accessToken = bizRes2.rows[0].meta_access_token;
+                }
+            }
+        }
+        
+        if (!accessToken) {
             const bizRes = await db.query("SELECT * FROM businesses WHERE user_id = ?", [userId]);
             if (bizRes.rows.length > 0) {
                 phoneId = bizRes.rows[0].whatsapp_phone_number_id;

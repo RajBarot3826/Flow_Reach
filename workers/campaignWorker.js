@@ -9,15 +9,22 @@ require('dotenv').config();
 
 // Create an async queue with a concurrency limit (e.g., 50 messages per second per Meta's limit)
 const campaignQueue = async.queue(async (task, callback) => {
-    const { campaignId, contact, template, user_id } = task;
+    const { campaignId, contact, template, user_id, phoneId: passedPhoneId } = task;
     
     console.log(`[Worker] Processing message for ${contact.phone} (Campaign ${campaignId})`);
 
     // 1. Fetch user-specific credentials if they exist in the DB, otherwise fall back to environment variables
-    let phoneId = null;
+    let phoneId = passedPhoneId || null;
     let accessToken = null;
     
-    if (user_id && !global.useMemoryDb) {
+    if (phoneId) {
+        const bizRes = await db.query("SELECT * FROM businesses WHERE whatsapp_phone_number_id = ?", [phoneId]);
+        if (bizRes.rows.length > 0) {
+            accessToken = bizRes.rows[0].meta_access_token;
+        }
+    }
+    
+    if (!accessToken && user_id) {
         const bizRes = await db.query("SELECT * FROM businesses WHERE user_id = ?", [user_id]);
         if (bizRes.rows.length > 0) {
             phoneId = bizRes.rows[0].whatsapp_phone_number_id;
