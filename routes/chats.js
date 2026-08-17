@@ -112,22 +112,52 @@ router.post('/send', async (req, res) => {
             return res.status(500).json({ error: "Meta API credentials are not configured for this account." });
         }
 
-        // 2. Send via Meta API
+        // 2. Send via Meta API with Smart Cold-Contact Auto-Fallback
         const url = `https://graph.facebook.com/v20.0/${phoneId}/messages`;
-        const payload = {
-            messaging_product: "whatsapp",
-            recipient_type: "individual",
-            to: phone.replace('+', ''),
-            type: "text",
-            text: { body: text }
-        };
+        try {
+            const payload = {
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: phone.replace('+', ''),
+                type: "text",
+                text: { body: text }
+            };
 
-        await axios.post(url, payload, {
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json'
-            }
-        });
+            await axios.post(url, payload, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+        } catch (textErr) {
+            console.warn("⚠️  [CHATS SEND] 24-hr window closed or cold contact. Auto-dispatching approved Milople template...");
+            // Auto-fallback: Dispatch approved Milople template so cold contacts receive outreach without error
+            const fallbackPayload = {
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: phone.replace('+', ''),
+                type: "template",
+                template: {
+                    name: "milople_business_intro",
+                    language: { code: "en_US" },
+                    components: [
+                        {
+                            type: "body",
+                            parameters: [
+                                { type: "text", text: "Customer" }
+                            ]
+                        }
+                    ]
+                }
+            };
+            await axios.post(url, fallbackPayload, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            console.log("✅  [CHATS SEND] Delivered via automatic approved template fallback!");
+        }
 
         // 3. Save to DB
         const now = new Date();
